@@ -22,7 +22,7 @@ namespace FunctionApp1
     {
 
         [FunctionName("ProcessTransaction")]
-        public static async Task<string> RunOrchestrator(
+        public static async Task<JObject> RunOrchestrator(
             [OrchestrationTrigger] IDurableOrchestrationContext context, ILogger log)
         {
             log.LogInformation($"Start");
@@ -67,7 +67,7 @@ namespace FunctionApp1
                 {
                     // Raise alert and send payment to holding queue
                     await context.CallActivityAsync("RaiseAlert", violation);
-                    return violation.ToString();
+                    return violation;
                 }
 
                 // Send payment to processing queue
@@ -80,7 +80,7 @@ namespace FunctionApp1
                 log.LogError($"Exception occurred: {ex.Message}");
                 await context.CallActivityAsync("SendToOperationsTopic", ex.Message);
             }
-            return eventData.ToString();
+            return eventData;
         }
 
         [FunctionName("GetTenantSettings")]
@@ -194,7 +194,7 @@ namespace FunctionApp1
 
         [FunctionName("RunHttp")]
         public static async Task<HttpResponseMessage> HttpStart(
-            [HttpTrigger(AuthorizationLevel.Anonymous, "get", "post",Route = "{tentId:string}")] HttpRequestMessage req,string tentId,
+            [HttpTrigger(AuthorizationLevel.Anonymous, "get", "post")] HttpRequestMessage req,
             [DurableClient] IDurableOrchestrationClient starter,
             ILogger log)
         {
