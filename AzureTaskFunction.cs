@@ -5,6 +5,7 @@ using System.Net.Http;
 using System.Text;
 using System.Threading.Tasks;
 using System.Transactions;
+using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http;
 using Microsoft.Azure.ServiceBus;
 using Microsoft.Azure.WebJobs;
@@ -21,36 +22,37 @@ namespace FunctionApp1
     {
 
         [FunctionName("ProcessTransaction")]
-        public static async Task RunOrchestrator(
+        public static async Task<JObject> RunOrchestrator(
             [OrchestrationTrigger] IDurableOrchestrationContext context, ILogger log)
         {
             log.LogInformation($"Start");
-            
 
-            string jsonString = @"{
-    ""correlationId"": ""0EC1D320-3FDD-43A0-84B8-3CF8972CDCD8"",
-    ""tenantId"": ""345"",
-    ""transactionId"": ""eyJpZCI6ImE2NDUzYTZlLTk1NjYtNDFmOC05ZjAzLTg3ZDVmMWQ3YTgxNSIsImlzIjoiU3RhcmxpbmciLCJydCI6InBheW1lbnQifQ"",
-    ""transactionDate"": ""2024-02-15 11:36:22"",
-    ""direction"": ""Credit"",
-    ""amount"": ""345.87"",
-    ""currency"": ""EUR"",
-    ""description"": ""Mr C A Woods"",
-    ""sourceaccount"": {
-        ""accountno"": ""44421232"",
-        ""sortcode"": ""30-23-20"",
-        ""countrycode"": ""GBR""
-    },
-    ""destinationaccount"": {
-        ""accountno"": ""87285552"",
-        ""sortcode"": ""10-33-12"",
-        ""countrycode"": ""HKG""
-    }
-}";
+            string jsonString = context.GetInput<object>().ToString();
+            log.LogInformation(jsonString);
+            //string jsonString = @"{
+            //    ""correlationId"": ""0EC1D320-3FDD-43A0-84B8-3CF8972CDCD8"",
+            //    ""tenantId"": ""345"",
+            //    ""transactionId"": ""eyJpZCI6ImE2NDUzYTZlLTk1NjYtNDFmOC05ZjAzLTg3ZDVmMWQ3YTgxNSIsImlzIjoiU3RhcmxpbmciLCJydCI6InBheW1lbnQifQ"",
+            //    ""transactionDate"": ""2024-02-15 11:36:22"",
+            //    ""direction"": ""Credit"",
+            //    ""amount"": ""345.87"",
+            //    ""currency"": ""EUR"",
+            //    ""description"": ""Mr C A Woods"",
+            //    ""sourceaccount"": {
+            //        ""accountno"": ""44421232"",
+            //        ""sortcode"": ""30-23-20"",
+            //        ""countrycode"": ""GBR""
+            //    },
+            //    ""destinationaccount"": {
+            //        ""accountno"": ""87285552"",
+            //        ""sortcode"": ""10-33-12"",
+            //        ""countrycode"": ""HKG""
+            //    }
+            //}";
 
             JObject eventData = JObject.Parse(jsonString);
 
-            
+
 
             // Retrieve Tenant settings
             var tenantId = eventData["tenantId"].ToString();
@@ -65,11 +67,12 @@ namespace FunctionApp1
                 {
                     // Raise alert and send payment to holding queue
                     await context.CallActivityAsync("RaiseAlert", violation);
-                    return;
+                    return violation;
                 }
 
                 // Send payment to processing queue
                 await context.CallActivityAsync("SendToProcessingQueue", eventData);
+                
             }
             catch (Exception ex)
             {
@@ -77,6 +80,7 @@ namespace FunctionApp1
                 log.LogError($"Exception occurred: {ex.Message}");
                 await context.CallActivityAsync("SendToOperationsTopic", ex.Message);
             }
+            return eventData;
         }
 
         [FunctionName("GetTenantSettings")]
@@ -94,7 +98,7 @@ namespace FunctionApp1
         {
             // Log the violation details
             log.LogWarning($"Potential fraudulent activity detected: {violation}");
-           
+
             return Task.CompletedTask;
         }
 
@@ -163,7 +167,7 @@ namespace FunctionApp1
         {
             string direction = eventData["direction"].ToString();
             decimal amount = decimal.Parse(eventData["amount"].ToString());
-            
+
             JArray tenantSettingsArray = (JArray)jq["tenantsettings"];
             JObject tenantSettings = (JObject)tenantSettingsArray[0];
             // Retrieve tenant-specific settings
@@ -183,13 +187,11 @@ namespace FunctionApp1
                 });
             }
 
-            // Additional assessment logic for velocity limits, country sanctions, etc.
-
             // Return null if no violations detected
             return null;
         }
-       
-        
+
+
         [FunctionName("RunHttp")]
         public static async Task<HttpResponseMessage> HttpStart(
             [HttpTrigger(AuthorizationLevel.Anonymous, "get", "post")] HttpRequestMessage req,
@@ -197,7 +199,8 @@ namespace FunctionApp1
             ILogger log)
         {
             // Function input comes from the request content.
-            string instanceId = await starter.StartNewAsync("ProcessTransaction", null);
+            var data = await req.Content.ReadAsAsync<object>();
+            string instanceId = await starter.StartNewAsync("ProcessTransaction", data);
 
             log.LogInformation($"Started orchestration with ID = '{instanceId}'.");
 
